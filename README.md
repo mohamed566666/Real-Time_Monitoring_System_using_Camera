@@ -13,7 +13,6 @@ A powerful real-time face recognition monitoring system built with FastAPI and m
 - **Database**: PostgreSQL with SQLAlchemy ORM
 - **AI/ML**: OpenCV, Face Recognition models (MobileFaceNet)
 
-## 📁 Project Structure
 
 ## 📁 Project Structure
 
