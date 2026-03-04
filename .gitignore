@@ -19,3 +19,6 @@ models/*.onnx
 .vscode/
 .idea/
 .DS_Store
+
+# MobileFaceNet models
+MobileFaceNet/
