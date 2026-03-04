@@ -15,25 +15,58 @@ A powerful real-time face recognition monitoring system built with FastAPI and m
 
 ## 📁 Project Structure
 
+## 📁 Project Structure
+
+```
+face-recognition-api/
 ├── server/
-│ ├── app/
-│ │ ├── application/ # Business logic layer
-│ │ │ ├── services/ # Application services
-│ │ │ └── usecases/ # Use cases implementation
-│ │ ├── core/ # Core configurations
-│ │ │ ├── config.py # Application settings
-│ │ │ └── dependencies.py # Dependency injection
-│ │ ├── domain/ # Domain layer
-│ │ │ └── entities/ # Business entities
-│ │ ├── infrastructure/ # External implementations
-│ │ │ ├── aiModels/ # AI/ML models
-│ │ │ ├── db/ # Database configurations
-│ │ │ └── repositories/ # Data repositories
-│ │ └── presentation/ # API layer
-│ │ └── controllers/ # Route controllers
-│ ├── models/ # Pre-trained models
-│ └── requirements.txt # Python dependencies
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── application/
+│   │   │   ├── __init__.py
+│   │   │   ├── services/
+│   │   │   └── usecases/
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py
+│   │   │   └── dependencies.py
+│   │   ├── domain/
+│   │   │   ├── __init__.py
+│   │   │   └── entities/
+│   │   ├── infrastructure/
+│   │   │   ├── __init__.py
+│   │   │   ├── aiModels/
+│   │   │   │   ├── __init__.py
+│   │   │   │   └── face_engine.py
+│   │   │   ├── db/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── base.py
+│   │   │   │   ├── database.py
+│   │   │   │   └── models.py
+│   │   │   └── repositories/
+│   │   │       ├── __init__.py
+│   │   │       ├── base_repository.py
+│   │   │       └── implementations/
+│   │   └── presentation/
+│   │       ├── __init__.py
+│   │       └── controllers/
+│   │           ├── __init__.py
+│   │           ├── auth_controller.py
+│   │           ├── user_controller.py
+│   │           ├── department_controller.py
+│   │           ├── device_controller.py
+│   │           └── face_embedding_controller.py
+│   ├── models/
+│   │   ├── .gitkeep
+│   │   ├── deploy.prototxt
+│   │   ├── res10_300x300_ssd_iter_140000.caffemodel
+│   │   └── MobileFaceNet/
+│   │       └── weights/
+│   │           └── mobilefacenet.onnx
+│   └── requirements.txt
 └── README.md
+```
 
 ## 🔧 Installation
 
