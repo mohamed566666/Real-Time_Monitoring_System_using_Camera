@@ -6,41 +6,66 @@ A powerful real-time face recognition monitoring system built with FastAPI and m
 
 - **Python**: Version 3.8 or higher
 - **PostgreSQL**: Version 12 or higher
-- **Redis**: Version 6 or higher (for caching and real-time features)
-- **CUDA**: Optional but recommended for GPU acceleration
-- **RAM**: Minimum 4GB (8GB+ recommended)
-- **Storage**: Minimum 5GB free space for models and data
 
 ## 🚀 Technology Stack
 
 - **Framework**: FastAPI (Python 3.8+)
 - **Database**: PostgreSQL with SQLAlchemy ORM
 - **AI/ML**: OpenCV, Face Recognition models (MobileFaceNet)
-- **Authentication**: JWT-based authentication
-- **Documentation**: Swagger UI / ReDoc
-- **Deployment**: Uvicorn/Gunicorn
+
 
 ## 📁 Project Structure
 
+```
+face-recognition-api/
 ├── server/
-│ ├── app/
-│ │ ├── application/ # Business logic layer
-│ │ │ ├── services/ # Application services
-│ │ │ └── usecases/ # Use cases implementation
-│ │ ├── core/ # Core configurations
-│ │ │ ├── config.py # Application settings
-│ │ │ └── dependencies.py # Dependency injection
-│ │ ├── domain/ # Domain layer
-│ │ │ └── entities/ # Business entities
-│ │ ├── infrastructure/ # External implementations
-│ │ │ ├── aiModels/ # AI/ML models
-│ │ │ ├── db/ # Database configurations
-│ │ │ └── repositories/ # Data repositories
-│ │ └── presentation/ # API layer
-│ │ └── controllers/ # Route controllers
-│ ├── models/ # Pre-trained models
-│ └── requirements.txt # Python dependencies
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── application/
+│   │   │   ├── __init__.py
+│   │   │   ├── services/
+│   │   │   └── usecases/
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py
+│   │   │   └── dependencies.py
+│   │   ├── domain/
+│   │   │   ├── __init__.py
+│   │   │   └── entities/
+│   │   ├── infrastructure/
+│   │   │   ├── __init__.py
+│   │   │   ├── aiModels/
+│   │   │   │   ├── __init__.py
+│   │   │   │   └── face_engine.py
+│   │   │   ├── db/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── base.py
+│   │   │   │   ├── database.py
+│   │   │   │   └── models.py
+│   │   │   └── repositories/
+│   │   │       ├── __init__.py
+│   │   │       ├── base_repository.py
+│   │   │       └── implementations/
+│   │   └── presentation/
+│   │       ├── __init__.py
+│   │       └── controllers/
+│   │           ├── __init__.py
+│   │           ├── auth_controller.py
+│   │           ├── user_controller.py
+│   │           ├── department_controller.py
+│   │           ├── device_controller.py
+│   │           └── face_embedding_controller.py
+│   ├── models/
+│   │   ├── .gitkeep
+│   │   ├── deploy.prototxt
+│   │   ├── res10_300x300_ssd_iter_140000.caffemodel
+│   │   └── MobileFaceNet/
+│   │       └── weights/
+│   │           └── mobilefacenet.onnx
+│   └── requirements.txt
 └── README.md
+```
 
 ## 🔧 Installation
 
