@@ -6,19 +6,12 @@ A powerful real-time face recognition monitoring system built with FastAPI and m
 
 - **Python**: Version 3.8 or higher
 - **PostgreSQL**: Version 12 or higher
-- **Redis**: Version 6 or higher (for caching and real-time features)
-- **CUDA**: Optional but recommended for GPU acceleration
-- **RAM**: Minimum 4GB (8GB+ recommended)
-- **Storage**: Minimum 5GB free space for models and data
 
 ## 🚀 Technology Stack
 
 - **Framework**: FastAPI (Python 3.8+)
 - **Database**: PostgreSQL with SQLAlchemy ORM
 - **AI/ML**: OpenCV, Face Recognition models (MobileFaceNet)
-- **Authentication**: JWT-based authentication
-- **Documentation**: Swagger UI / ReDoc
-- **Deployment**: Uvicorn/Gunicorn
 
 ## 📁 Project Structure
 
