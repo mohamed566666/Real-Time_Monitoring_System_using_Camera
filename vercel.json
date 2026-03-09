@@ -5,10 +5,5 @@
       "use": "@vercel/python"
     }
   ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "Server/app/main.py"
-    }
-  ]
+  "version": 2
 }
