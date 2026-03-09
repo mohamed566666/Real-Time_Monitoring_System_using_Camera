@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+env/
+.env
+*.db
+*.sqlite3
+
+# Models 
+models/*.caffemodel
+models/*.prototxt
+models/*.onnx
+!models/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# MobileFaceNet models
+MobileFaceNet/
