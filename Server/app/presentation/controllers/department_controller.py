@@ -1,79 +1,77 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
-from app.application.services.department_service import DepartmentService
-from app.application.usecases.department_usecases import (
-    CreateDepartmentUseCase,
-    GetDepartmentUseCase,
-    ListDepartmentsUseCase,
-    DeleteDepartmentUseCase,
-    AssignManagerUseCase,
-)
-from app.core.dependencies import get_department_service
+from app.core.dependencies import get_dept_usecases, require_admin
+from app.application.usecases.department_usecases import DepartmentUseCases
+from app.domain.entities.entities import DepartmentEntity
+
+router = APIRouter(prefix="/departments", tags=["Departments"])
 
 
 class DepartmentCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=2, max_length=100)
+
+
+class DepartmentUpdate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
 
 
 class DepartmentResponse(BaseModel):
     id: int
     name: str
-    manager_id: Optional[int] = None
 
     class Config:
         from_attributes = True
 
 
-router = APIRouter(prefix="/departments", tags=["Departments"])
+def _schema(e: DepartmentEntity) -> DepartmentResponse:
+    return DepartmentResponse(id=e.id, name=e.name)
 
 
-@router.post(
-    "/", response_model=DepartmentResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("", response_model=DepartmentResponse, summary="Create a department")
 async def create_department(
-    department: DepartmentCreate,
-    service: DepartmentService = Depends(get_department_service),
+    body: DepartmentCreate,
+    usecases: DepartmentUseCases = Depends(get_dept_usecases),
+    _: dict = Depends(require_admin),
 ):
-    use_case = CreateDepartmentUseCase(service)
-    try:
-        created = await use_case.execute(name=department.name, manager_id=None)
-        return created
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    return _schema(await usecases.create_department(body.name))
 
 
-@router.get("/", response_model=List[DepartmentResponse])
+@router.get("", response_model=List[DepartmentResponse], summary="List all departments")
 async def list_departments(
-    service: DepartmentService = Depends(get_department_service),
+    usecases: DepartmentUseCases = Depends(get_dept_usecases),
+    _: dict = Depends(require_admin),
 ):
-    use_case = ListDepartmentsUseCase(service)
-    departments = await use_case.execute()
-    return departments
+    return [_schema(e) for e in await usecases.list_departments()]
 
 
-@router.delete("/{dept_id}")
-async def delete_department(
-    dept_id: int, service: DepartmentService = Depends(get_department_service)
-):
-    use_case = DeleteDepartmentUseCase(service)
-    try:
-        await use_case.execute(dept_id)
-        return {"detail": "Department deleted"}
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-
-
-@router.put("/{dept_id}/assign_manager/{manager_id}")
-async def assign_manager(
+@router.get("/{dept_id}", response_model=DepartmentResponse, summary="Get a department")
+async def get_department(
     dept_id: int,
-    manager_id: int,
-    service: DepartmentService = Depends(get_department_service),
+    usecases: DepartmentUseCases = Depends(get_dept_usecases),
+    _: dict = Depends(require_admin),
 ):
-    use_case = AssignManagerUseCase(service)
-    try:
-        dept = await use_case.execute(dept_id, manager_id)
-        return dept
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return _schema(await usecases.get_department(dept_id))
+
+
+@router.patch(
+    "/{dept_id}", response_model=DepartmentResponse, summary="Rename a department"
+)
+async def rename_department(
+    dept_id: int,
+    body: DepartmentUpdate,
+    usecases: DepartmentUseCases = Depends(get_dept_usecases),
+    _: dict = Depends(require_admin),
+):
+    return _schema(await usecases.rename_department(dept_id, body.name))
+
+
+@router.delete("/{dept_id}", summary="Delete a department")
+async def delete_department(
+    dept_id: int,
+    usecases: DepartmentUseCases = Depends(get_dept_usecases),
+    _: dict = Depends(require_admin),
+):
+    await usecases.delete_department(dept_id)
+    return {"detail": "Department deleted"}

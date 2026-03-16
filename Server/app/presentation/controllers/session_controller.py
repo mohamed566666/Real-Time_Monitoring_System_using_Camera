@@ -1,98 +1,158 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from uuid import UUID
 from typing import List, Optional
+from datetime import datetime
+from uuid import UUID
+from fastapi import APIRouter, Depends, File, UploadFile
+from pydantic import BaseModel
 
-from app.core.dependencies import (
-    get_list_all_sessions_usecase_for_controller,
-    get_list_active_sessions_usecase_for_controller,
-    get_get_session_usecase_for_controller,
-    get_force_end_session_usecase_for_controller,
-    get_user_session_history_usecase_for_controller,
-    get_active_session_for_user_usecase_for_controller,
-)
-from app.application.usecases.session_usecases import (
-    ListAllSessionsUseCase,
-    ListActiveSessionsUseCase,
-    GetSessionUseCase,
-    ForceEndSessionUseCase,
-    GetUserSessionHistoryUseCase,
-    GetActiveSessionForUserUseCase,
-)
-from app.domain.entities.session import Session
+from app.core.dependencies import get_session_usecases, require_any_auth
+from app.application.usecases.session_usecases import SessionUseCases
+from app.domain.entities.entities import SessionEntity, SessionEndReason
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
 
-@router.get("/")
-async def get_all_sessions(
-    usecase: ListAllSessionsUseCase = Depends(
-        get_list_all_sessions_usecase_for_controller
-    ),
-) -> List[Session]:
-    """Get all sessions (both active and ended)"""
-    return await usecase.execute()
+
+class LoginWithEmbeddingRequest(BaseModel):
+    username: str
+    embedding: list[float]
 
 
-@router.get("/active")
-async def get_active_sessions(
-    usecase: ListActiveSessionsUseCase = Depends(
-        get_list_active_sessions_usecase_for_controller
-    ),
-) -> List[Session]:
-    """List currently active sessions (not logged out)"""
-    return await usecase.execute()
+class SessionClose(BaseModel):
+    end_reason: SessionEndReason = SessionEndReason.LOGOUT
 
 
-@router.get("/user/{user_id}")
-async def get_user_session_history(
-    user_id: int,
-    usecase: GetUserSessionHistoryUseCase = Depends(
-        get_user_session_history_usecase_for_controller
-    ),
-) -> List[Session]:
-    """Get session history for a specific user"""
-    return await usecase.execute(user_id)
+class SessionResponse(BaseModel):
+    id: UUID
+    employee_id: int
+    login_time: datetime
+    logout_time: Optional[datetime]
+    end_reason: Optional[SessionEndReason]
 
 
-@router.get("/user/{user_id}/active")
-async def get_user_active_session(
-    user_id: int,
-    usecase: GetActiveSessionForUserUseCase = Depends(
-        get_active_session_for_user_usecase_for_controller
-    ),
+def _schema(e: SessionEntity) -> SessionResponse:
+    return SessionResponse(
+        id=e.id,
+        employee_id=e.employee_id,
+        login_time=e.login_time,
+        logout_time=e.logout_time,
+        end_reason=e.end_reason,
+    )
+
+
+
+@router.post(
+    "/open/{username}",
+    response_model=SessionResponse,
+    summary="[DEBUG] Open session directly by username — no face verification",
+)
+async def open_session_by_username(
+    username: str,
+    usecases: SessionUseCases = Depends(get_session_usecases),
 ):
-    """Get active session for a specific user (if any)"""
-    session = await usecase.execute(user_id)
-    if not session:
-        raise HTTPException(
-            status_code=404, detail="No active session found for this user"
-        )
-    return session
+    from fastapi import HTTPException
+
+    emp = await usecases.employee_repo.get_by_username(username)
+    if not emp:
+        raise HTTPException(status_code=404, detail=f"Employee '{username}' not found")
+    return _schema(await usecases.open_session(emp.id))
 
 
-@router.get("/{session_id}")
+@router.post(
+    "/login",
+    response_model=SessionResponse,
+    summary="Login with pre-computed embedding vector (edge device)",
+)
+async def login_with_embedding(
+    body: LoginWithEmbeddingRequest,
+    usecases: SessionUseCases = Depends(get_session_usecases),
+    _: dict = Depends(require_any_auth),
+):
+    return _schema(await usecases.login_with_embedding(body.username, body.embedding))
+
+
+@router.post(
+    "/login/image",
+    response_model=SessionResponse,
+    summary="[DEBUG] Login with face photo — server extracts embedding",
+)
+async def login_with_image(
+    username: str = ...,
+    photo: UploadFile = File(..., description="Face photo (JPEG / PNG)"),
+    usecases: SessionUseCases = Depends(get_session_usecases),
+    _: dict = Depends(require_any_auth),
+):
+    """
+    Testing convenience: send username + photo as multipart/form-data.
+    Server extracts the embedding itself and opens a session if face matches.
+    """
+    image_bytes = await photo.read()
+    return _schema(await usecases.login_with_image(username, image_bytes))
+
+
+
+@router.post(
+    "/{session_id}/close", response_model=SessionResponse, summary="Close a session"
+)
+async def close_session(
+    session_id: UUID,
+    body: SessionClose = SessionClose(),
+    usecases: SessionUseCases = Depends(get_session_usecases),
+    _: dict = Depends(require_any_auth),
+):
+    return _schema(await usecases.close_session(session_id, body.end_reason))
+
+
+@router.get("", response_model=List[SessionResponse], summary="List all sessions")
+async def list_all_sessions(
+    usecases: SessionUseCases = Depends(get_session_usecases),
+):
+    return [_schema(e) for e in await usecases.list_all_sessions()]
+
+
+@router.get(
+    "/department/{dept_id}",
+    response_model=List[SessionResponse],
+    summary="List all sessions for employees in a department",
+)
+async def list_sessions_by_department(
+    dept_id: int,
+    usecases: SessionUseCases = Depends(get_session_usecases),
+):
+    return [_schema(e) for e in await usecases.list_sessions_by_department(dept_id)]
+
+
+@router.get(
+    "/employee/{employee_id}",
+    response_model=List[SessionResponse],
+    summary="Get all sessions for an employee",
+)
+async def list_sessions(
+    employee_id: int,
+    usecases: SessionUseCases = Depends(get_session_usecases),
+    _: dict = Depends(require_any_auth),
+):
+    return [_schema(e) for e in await usecases.list_sessions_by_employee(employee_id)]
+
+
+@router.get(
+    "/employee/{employee_id}/active",
+    response_model=SessionResponse,
+    summary="Get active session for an employee",
+)
+async def get_active_session(
+    employee_id: int,
+    usecases: SessionUseCases = Depends(get_session_usecases),
+    _: dict = Depends(require_any_auth),
+):
+    return _schema(await usecases.get_active_session(employee_id))
+
+
+@router.get(
+    "/{session_id}", response_model=SessionResponse, summary="Get session by ID"
+)
 async def get_session(
     session_id: UUID,
-    usecase: GetSessionUseCase = Depends(get_get_session_usecase_for_controller),
-) -> Session:
-    """Get session by ID"""
-    session = await usecase.execute(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
-
-
-@router.post("/{session_id}/force-end")
-async def force_end_session(
-    session_id: UUID,
-    usecase: ForceEndSessionUseCase = Depends(
-        get_force_end_session_usecase_for_controller
-    ),
+    usecases: SessionUseCases = Depends(get_session_usecases),
+    _: dict = Depends(require_any_auth),
 ):
-    """Force-end a session (admin only maybe)"""
-    success = await usecase.execute(session_id, "force_ended")
-    if not success:
-        raise HTTPException(
-            status_code=404, detail="Session not found or already ended"
-        )
-    return {"message": "Session ended successfully", "session_id": str(session_id)}
+    return _schema(await usecases.get_session(session_id))

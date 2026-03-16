@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Socket.IO Test</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; }
+
+  header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 14px; color: #58a6ff; }
+  #status-dot { width: 10px; height: 10px; border-radius: 50%; background: #f85149; transition: background .3s; }
+  #status-dot.connected { background: #3fb950; }
+  #status-text { font-size: 12px; color: #8b949e; }
+
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* LEFT: controls */
+  .controls { width: 340px; min-width: 340px; background: #161b22; border-right: 1px solid #30363d; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+
+  .card { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; padding: 14px; }
+  .card h3 { font-size: 11px; color: #58a6ff; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 10px; }
+
+  label { font-size: 11px; color: #8b949e; display: block; margin-bottom: 4px; margin-top: 8px; }
+  input, select { width: 100%; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 6px 10px; font-family: monospace; font-size: 12px; outline: none; }
+  input:focus, select:focus { border-color: #58a6ff; }
+
+  button { width: 100%; margin-top: 10px; padding: 7px; border-radius: 6px; border: none; cursor: pointer; font-family: monospace; font-size: 12px; font-weight: 600; transition: opacity .2s; }
+  button:hover { opacity: .85; }
+  .btn-green  { background: #238636; color: #fff; }
+  .btn-blue   { background: #1f6feb; color: #fff; }
+  .btn-orange { background: #9e6a03; color: #fff; }
+  .btn-red    { background: #da3633; color: #fff; }
+  .btn-gray   { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+
+  /* RIGHT: log */
+  .log-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .log-toolbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; display: flex; justify-content: space-between; align-items: center; }
+  .log-toolbar span { font-size: 11px; color: #8b949e; }
+  #clear-btn { background: none; border: 1px solid #30363d; color: #8b949e; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+  #log { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+
+  .log-entry { font-size: 12px; line-height: 1.5; padding: 8px 12px; border-radius: 6px; border-left: 3px solid; }
+  .log-entry .time { color: #484f58; margin-right: 8px; }
+  .log-entry.info   { background: #161b22; border-color: #58a6ff; }
+  .log-entry.sent   { background: #0d2010; border-color: #3fb950; }
+  .log-entry.recv   { background: #0d1b2e; border-color: #1f6feb; }
+  .log-entry.error  { background: #2a0e0e; border-color: #f85149; }
+  .log-entry.warn   { background: #211a00; border-color: #e3b341; }
+  .log-entry pre { white-space: pre-wrap; word-break: break-all; margin-top: 4px; color: #8b949e; }
+
+  #hb-timer { font-size: 11px; color: #3fb950; margin-top: 6px; text-align: center; display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div id="status-dot"></div>
+  <h1>Socket.IO Dev Tester</h1>
+  <span id="status-text">disconnected</span>
+</header>
+
+<div class="main">
+
+  <!-- CONTROLS -->
+  <div class="controls">
+
+    <!-- Connect -->
+    <div class="card">
+      <h3>Connection</h3>
+      <label>Server URL</label>
+      <input id="url" value="http://localhost:8000">
+      <button class="btn-green" onclick="connect()">Connect</button>
+      <button class="btn-red"   onclick="disconnect()" style="margin-top:6px">Disconnect</button>
+    </div>
+
+    <!-- Join room -->
+    <div class="card">
+      <h3>Join Manager Room</h3>
+      <label>Manager ID</label>
+      <input id="manager-id" type="number" value="1">
+      <button class="btn-blue" onclick="joinRoom()">Join Room</button>
+    </div>
+
+    <!-- Heartbeat -->
+    <div class="card">
+      <h3>Heartbeat</h3>
+      <label>Session ID (UUID)</label>
+      <input id="session-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+      <label>Status</label>
+      <select id="hb-status">
+        <option value="active">active</option>
+        <option value="inactive">inactive (should fail)</option>
+      </select>
+      <button class="btn-orange" onclick="sendHeartbeat()">Send Once</button>
+      <button class="btn-gray"   onclick="toggleAutoHB()" id="auto-hb-btn">Start Auto (60s)</button>
+      <div id="hb-timer">Next heartbeat in <span id="hb-countdown">60</span>s</div>
+    </div>
+
+    <!-- Custom event -->
+    <div class="card">
+      <h3>Custom Emit</h3>
+      <label>Event name</label>
+      <input id="custom-event" value="heartbeat">
+      <label>Payload (JSON)</label>
+      <input id="custom-payload" value='{"session_id":"","status":"active"}'>
+      <button class="btn-blue" onclick="sendCustom()">Emit</button>
+    </div>
+
+  </div>
+
+  <!-- LOG -->
+  <div class="log-panel">
+    <div class="log-toolbar">
+      <span id="log-count">0 events</span>
+      <button id="clear-btn" onclick="clearLog()">Clear</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<script>
+let socket = null;
+let autoHBInterval = null;
+let countdownInterval = null;
+let logCount = 0;
+
+// ── logging ──────────────────────────────────────────────────────────────────
+
+function log(type, title, data) {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const now = new Date().toTimeString().slice(0,8);
+  let html = `<span class="time">${now}</span><strong>${title}</strong>`;
+  if (data !== undefined) {
+    html += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+  }
+  entry.innerHTML = html;
+  const logEl = document.getElementById('log');
+  logEl.appendChild(entry);
+  logEl.scrollTop = logEl.scrollHeight;
+  logCount++;
+  document.getElementById('log-count').textContent = `${logCount} events`;
+}
+
+function clearLog() {
+  document.getElementById('log').innerHTML = '';
+  logCount = 0;
+  document.getElementById('log-count').textContent = '0 events';
+}
+
+// ── connection ────────────────────────────────────────────────────────────────
+
+function connect() {
+  const url = document.getElementById('url').value.trim();
+  if (socket) socket.disconnect();
+
+  socket = io(url, { transports: ['websocket'], reconnection: false });
+
+  socket.on('connect', () => {
+    document.getElementById('status-dot').classList.add('connected');
+    document.getElementById('status-text').textContent = `connected — sid: ${socket.id}`;
+    log('info', 'Connected', { sid: socket.id, url });
+  });
+
+  socket.on('disconnect', (reason) => {
+    document.getElementById('status-dot').classList.remove('connected');
+    document.getElementById('status-text').textContent = 'disconnected';
+    log('warn', 'Disconnected', { reason });
+  });
+
+  socket.on('connect_error', (err) => {
+    log('error', 'Connection error', { message: err.message });
+  });
+
+  // ── listen to ALL server events ──
+  const SERVER_EVENTS = ['heartbeat_ack', 'alert', 'session_closed'];
+  SERVER_EVENTS.forEach(ev => {
+    socket.on(ev, (data) => {
+      log('recv', `← ${ev}`, data);
+    });
+  });
+
+  // catch-all for any other event
+  socket.onAny((event, ...args) => {
+    if (!SERVER_EVENTS.includes(event)) {
+      log('recv', `← ${event} (unknown)`, args);
+    }
+  });
+}
+
+function disconnect() {
+  if (socket) { socket.disconnect(); socket = null; }
+  stopAutoHB();
+}
+
+// ── join room ─────────────────────────────────────────────────────────────────
+
+function joinRoom() {
+  if (!socket?.connected) { log('error', 'Not connected'); return; }
+  const managerId = parseInt(document.getElementById('manager-id').value);
+  const payload = { manager_id: managerId };
+  log('sent', '→ join_room', payload);
+  socket.emit('join_room', payload, (ack) => {
+    log('recv', '← join_room ack', ack);
+  });
+}
+
+// ── heartbeat ─────────────────────────────────────────────────────────────────
+
+function sendHeartbeat() {
+  if (!socket?.connected) { log('error', 'Not connected'); return; }
+  const sessionId = document.getElementById('session-id').value.trim();
+  const status    = document.getElementById('hb-status').value;
+  const payload   = { session_id: sessionId, status };
+  log('sent', '→ heartbeat', payload);
+  socket.emit('heartbeat', payload);
+}
+
+function toggleAutoHB() {
+  if (autoHBInterval) { stopAutoHB(); return; }
+  startAutoHB();
+}
+
+function startAutoHB() {
+  sendHeartbeat();
+  let remaining = 60;
+  document.getElementById('hb-timer').style.display = 'block';
+  document.getElementById('hb-countdown').textContent = remaining;
+  document.getElementById('auto-hb-btn').textContent  = 'Stop Auto';
+  document.getElementById('auto-hb-btn').className    = 'btn-red';
+
+  countdownInterval = setInterval(() => {
+    remaining--;
+    document.getElementById('hb-countdown').textContent = remaining;
+    if (remaining <= 0) remaining = 60;
+  }, 1000);
+
+  autoHBInterval = setInterval(() => {
+    sendHeartbeat();
+    remaining = 60;
+  }, 60000);
+}
+
+function stopAutoHB() {
+  clearInterval(autoHBInterval);
+  clearInterval(countdownInterval);
+  autoHBInterval = null;
+  document.getElementById('hb-timer').style.display = 'none';
+  document.getElementById('auto-hb-btn').textContent = 'Start Auto (60s)';
+  document.getElementById('auto-hb-btn').className   = 'btn-gray';
+}
+
+// ── custom emit ───────────────────────────────────────────────────────────────
+
+function sendCustom() {
+  if (!socket?.connected) { log('error', 'Not connected'); return; }
+  const event = document.getElementById('custom-event').value.trim();
+  let payload;
+  try {
+    payload = JSON.parse(document.getElementById('custom-payload').value);
+  } catch {
+    log('error', 'Invalid JSON payload'); return;
+  }
+  log('sent', `→ ${event}`, payload);
+  socket.emit(event, payload, (ack) => {
+    if (ack !== undefined) log('recv', `← ${event} ack`, ack);
+  });
+}
+</script>
+</body>
+</html>

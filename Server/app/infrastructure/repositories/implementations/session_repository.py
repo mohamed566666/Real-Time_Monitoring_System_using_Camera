@@ -1,123 +1,106 @@
-from sqlalchemy import select, update, desc
-from datetime import datetime
+from typing import Optional, List
 from uuid import UUID
-from typing import List, Optional, Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
-from app.infrastructure.db.models import Session as SessionModel
 from app.infrastructure.repositories.base_repository import BaseRepository
-from app.infrastructure.repositories.interfaces.session_repository import (
-    ISessionRepository,
-)
+from app.infrastructure.db.models import Session
+from app.domain.entities.entities import SessionEntity, SessionEndReason
 
 
-class SessionRepository(BaseRepository[SessionModel], ISessionRepository):
+def _to_entity(db_obj: Session) -> SessionEntity:
+    return SessionEntity(
+        id=db_obj.id,
+        employee_id=db_obj.employee_id,
+        login_time=db_obj.login_time,
+        logout_time=db_obj.logout_time,
+        end_reason=(
+            SessionEndReason(db_obj.end_reason.value) if db_obj.end_reason else None
+        ),
+    )
 
-    def __init__(self, session):
-        super().__init__(session, SessionModel)
 
-    async def get(self, id: UUID) -> Optional[SessionModel]:
-        return await self.get_by_id(id)
+class SessionRepository(BaseRepository[SessionEntity]):
 
-    async def list(self, skip: int = 0, limit: int = 100) -> List[SessionModel]:
-        query = (
-            select(self.model_class)
-            .order_by(desc(self.model_class.login_time))
-            .offset(skip)
-            .limit(limit)
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def get_by_id(self, entity_id: UUID) -> Optional[SessionEntity]:
+        result = await self.db.execute(select(Session).where(Session.id == entity_id))
+        obj = result.scalar_one_or_none()
+        return _to_entity(obj) if obj else None
+
+    async def get_active_by_employee(self, employee_id: int) -> Optional[SessionEntity]:
+        """Returns the currently open session (no logout_time) for an employee."""
+        result = await self.db.execute(
+            select(Session).where(
+                Session.employee_id == employee_id,
+                Session.logout_time.is_(None),
+            )
         )
-        result = await self.session.execute(query)
-        return result.scalars().all()
+        obj = result.scalar_one_or_none()
+        return _to_entity(obj) if obj else None
 
-    async def active(self) -> List[SessionModel]:
-        query = select(self.model_class).where(self.model_class.logout_time.is_(None))
-        result = await self.session.execute(query)
-        return result.scalars().all()
-
-    async def list_active(self) -> List[SessionModel]:
-        return await self.active()
-
-    async def by_user(self, user_id: int) -> List[SessionModel]:
-        return await self.filter(user_id=user_id)
-
-    async def get_user_sessions(
-        self, user_id: int, active_only: bool = False
-    ) -> List[SessionModel]:
-        query = select(self.model_class).where(self.model_class.user_id == user_id)
-
-        if active_only:
-            query = query.where(self.model_class.logout_time.is_(None))
-
-        query = query.order_by(desc(self.model_class.login_time))
-        result = await self.session.execute(query)
-        return result.scalars().all()
-
-    async def by_device(self, device_id: int) -> List[SessionModel]:
-        return await self.filter(device_id=device_id)
-
-    async def get_device_sessions(
-        self, device_id: int, active_only: bool = False
-    ) -> List[SessionModel]:
-        query = select(self.model_class).where(self.model_class.device_id == device_id)
-
-        if active_only:
-            query = query.where(self.model_class.logout_time.is_(None))
-
-        query = query.order_by(desc(self.model_class.login_time))
-        result = await self.session.execute(query)
-        return result.scalars().all()
-
-    async def get_active_sessions(
-        self, device_id: Optional[int] = None, user_id: Optional[int] = None
-    ) -> List[SessionModel]:
-        query = select(self.model_class).where(self.model_class.logout_time.is_(None))
-
-        if device_id:
-            query = query.where(self.model_class.device_id == device_id)
-        if user_id:
-            query = query.where(self.model_class.user_id == user_id)
-
-        query = query.order_by(desc(self.model_class.login_time))
-        result = await self.session.execute(query)
-        return result.scalars().all()
-
-    async def create(self, s: SessionModel) -> SessionModel:
-        return await self.add(s)
-
-    async def end(self, session_id: UUID, reason: str) -> bool:
-        query = (
-            update(self.model_class)
-            .where(self.model_class.id == session_id)
-            .where(self.model_class.logout_time.is_(None))
-            .values(logout_time=datetime.utcnow(), end_reason=reason)
+    async def get_by_employee(self, employee_id: int) -> List[SessionEntity]:
+        result = await self.db.execute(
+            select(Session).where(Session.employee_id == employee_id)
         )
-        result = await self.session.execute(query)
-        await self.session.flush()
-        return result.rowcount > 0
+        return [_to_entity(r) for r in result.scalars().all()]
 
-    async def get_stats(self) -> Dict[str, Any]:
-        from sqlalchemy import func
+    async def get_by_department(self, department_id: int) -> List[SessionEntity]:
+        """Returns all sessions for employees in a given department."""
+        from app.infrastructure.db.models import Employee
 
-        total_query = select(func.count()).select_from(self.model_class)
-        total_result = await self.session.execute(total_query)
-        total = total_result.scalar()
-
-        active_query = select(func.count()).where(
-            self.model_class.logout_time.is_(None)
+        result = await self.db.execute(
+            select(Session)
+            .join(Employee, Employee.id == Session.employee_id)
+            .where(Employee.department_id == department_id)
         )
-        active_result = await self.session.execute(active_query)
-        active = active_result.scalar()
+        return [_to_entity(r) for r in result.scalars().all()]
 
-        today_start = datetime.utcnow().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        today_query = select(func.count()).where(
-            self.model_class.login_time >= today_start
-        )
-        today_result = await self.session.execute(today_query)
-        today = today_result.scalar()
+    async def get_all(self) -> List[SessionEntity]:
+        result = await self.db.execute(select(Session))
+        return [_to_entity(r) for r in result.scalars().all()]
 
-        return {
-            "total_sessions": total or 0,
-            "active_sessions": active or 0,
-            "today_sessions": today or 0,
-        }
+    async def create(self, entity: SessionEntity) -> SessionEntity:
+        from app.infrastructure.db.models import SessionEndReason as DBSessionEndReason
+
+        db_obj = Session(
+            id=entity.id,
+            employee_id=entity.employee_id,
+            login_time=entity.login_time,
+            logout_time=entity.logout_time,
+            end_reason=(
+                DBSessionEndReason(entity.end_reason.value)
+                if entity.end_reason
+                else None
+            ),
+        )
+        self.db.add(db_obj)
+        await self.db.commit()
+        await self.db.refresh(db_obj)
+        return _to_entity(db_obj)
+
+    async def update(self, entity: SessionEntity) -> SessionEntity:
+        from app.infrastructure.db.models import SessionEndReason as DBSessionEndReason
+
+        result = await self.db.execute(select(Session).where(Session.id == entity.id))
+        db_obj = result.scalar_one_or_none()
+        if not db_obj:
+            raise ValueError(f"Session {entity.id} not found")
+        db_obj.logout_time = entity.logout_time
+        db_obj.end_reason = (
+            DBSessionEndReason(entity.end_reason.value) if entity.end_reason else None
+        )
+        await self.db.commit()
+        await self.db.refresh(db_obj)
+        return _to_entity(db_obj)
+
+    async def delete(self, entity_id: UUID) -> bool:
+        result = await self.db.execute(select(Session).where(Session.id == entity_id))
+        db_obj = result.scalar_one_or_none()
+        if not db_obj:
+            return False
+        await self.db.delete(db_obj)
+        await self.db.commit()
+        return True

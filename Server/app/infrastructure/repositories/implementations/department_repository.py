@@ -1,66 +1,65 @@
-from app.infrastructure.db.models import Department
+from typing import Optional, List
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+
 from app.infrastructure.repositories.base_repository import BaseRepository
-from app.infrastructure.repositories.interfaces.department_repository import (
-    IDepartmentRepository,
-)
-from typing import List, Optional
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select
+from app.infrastructure.db.models import Department
+from app.domain.entities.entities import DepartmentEntity
 
 
-class DepartmentRepository(BaseRepository[Department], IDepartmentRepository):
+def _to_entity(db_obj: Department) -> DepartmentEntity:
+    return DepartmentEntity(id=db_obj.id, name=db_obj.name)
 
-    def __init__(self, session):
-        super().__init__(session, Department)
 
-    async def get(self, id) -> Optional[Department]:
-        return await self.get_by_id(id)
+class DepartmentRepository(BaseRepository[DepartmentEntity]):
 
-    async def get_by_name(self, name) -> Optional[Department]:
-        return await self.get_by_field("name", name)
+    def __init__(self, db: AsyncSession):
+        self.db = db
 
-    async def list(self) -> List[Department]:
-        return await self.get_all()
+    async def get_by_id(self, entity_id: int) -> Optional[DepartmentEntity]:
+        result = await self.db.execute(
+            select(Department).where(Department.id == entity_id)
+        )
+        obj = result.scalar_one_or_none()
+        return _to_entity(obj) if obj else None
 
-    async def create(self, dept: Department) -> Department:
-        try:
-            self.session.add(dept)
-            await self.session.commit()
-            await self.session.refresh(dept)
-            return dept
-        except IntegrityError as e:
-            await self.session.rollback()
-            if "unique constraint" in str(e).lower() or "duplicate" in str(e).lower():
-                raise ValueError(f"Department with name '{dept.name}' already exists")
-            raise ValueError(f"Database error: {str(e)}")
-        except Exception as e:
-            await self.session.rollback()
-            raise ValueError(f"Failed to create department: {str(e)}")
+    async def get_by_name(self, name: str) -> Optional[DepartmentEntity]:
+        result = await self.db.execute(
+            select(Department).where(Department.name == name)
+        )
+        obj = result.scalar_one_or_none()
+        return _to_entity(obj) if obj else None
 
-    async def delete(self, dept_id: int) -> bool:
-        try:
-            dept = await self.get_by_id(dept_id)
-            if dept:
-                await self.session.delete(dept)
-                await self.session.commit()
-                return True
+    async def get_all(self) -> List[DepartmentEntity]:
+        result = await self.db.execute(select(Department))
+        return [_to_entity(r) for r in result.scalars().all()]
+
+    async def create(self, entity: DepartmentEntity) -> DepartmentEntity:
+        db_obj = Department(id=entity.id, name=entity.name)
+        self.db.add(db_obj)
+        await self.db.commit()
+        await self.db.refresh(db_obj)
+        return _to_entity(db_obj)
+
+    async def update(self, entity: DepartmentEntity) -> DepartmentEntity:
+        result = await self.db.execute(
+            select(Department).where(Department.id == entity.id)
+        )
+        db_obj = result.scalar_one_or_none()
+        if not db_obj:
+            raise ValueError(f"Department {entity.id} not found")
+        db_obj.name = entity.name
+        await self.db.commit()
+        await self.db.refresh(db_obj)
+        return _to_entity(db_obj)
+
+    async def delete(self, entity_id: int) -> bool:
+        result = await self.db.execute(
+            select(Department).where(Department.id == entity_id)
+        )
+        db_obj = result.scalar_one_or_none()
+        if not db_obj:
             return False
-        except Exception as e:
-            await self.session.rollback()
-            raise e
-
-    async def update_manager(
-        self, dept_id: int, manager_id: int
-    ) -> Optional[Department]:
-        try:
-            dept = await self.get_by_id(dept_id)
-            if not dept:
-                return None
-
-            dept.manager_id = manager_id
-            await self.session.commit()
-            await self.session.refresh(dept)
-            return dept
-        except Exception as e:
-            await self.session.rollback()
-            raise e
+        await self.db.delete(db_obj)
+        await self.db.commit()
+        return True

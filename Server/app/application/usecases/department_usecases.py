@@ -1,52 +1,52 @@
-from app.application.services.department_service import DepartmentService
-from app.domain.entities.department import Department
-from typing import List, Optional
+from typing import List
+from fastapi import HTTPException, status
+
+from app.domain.entities.entities import DepartmentEntity
+from app.infrastructure.repositories.implementations.department_repository import (
+    DepartmentRepository,
+)
 
 
-class CreateDepartmentUseCase:
-    def __init__(self, service: DepartmentService):
-        self.service = service
+class DepartmentUseCases:
 
-    async def execute(self, name: str, manager_id: Optional[int] = None) -> Department:
-        return await self.service.create_department(name, manager_id)
+    def __init__(self, dept_repo: DepartmentRepository):
+        self.dept_repo = dept_repo
 
+    async def create_department(self, name: str) -> DepartmentEntity:
+        existing = await self.dept_repo.get_by_name(name)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Department '{name}' already exists",
+            )
+        return await self.dept_repo.create(DepartmentEntity(id=None, name=name))
 
-class GetDepartmentUseCase:
-    def __init__(self, service: DepartmentService):
-        self.service = service
-
-    async def execute(self, dept_id: int) -> Optional[Department]:
-        dept = await self.service.get_department(dept_id)
+    async def get_department(self, department_id: int) -> DepartmentEntity:
+        dept = await self.dept_repo.get_by_id(department_id)
         if not dept:
-            raise ValueError(f"Department with ID {dept_id} not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Department not found"
+            )
         return dept
 
+    async def list_departments(self) -> List[DepartmentEntity]:
+        return await self.dept_repo.get_all()
 
-class ListDepartmentsUseCase:
-    def __init__(self, service: DepartmentService):
-        self.service = service
+    async def rename_department(
+        self, department_id: int, new_name: str
+    ) -> DepartmentEntity:
+        dept = await self.dept_repo.get_by_id(department_id)
+        if not dept:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Department not found"
+            )
+        dept.name = new_name
+        return await self.dept_repo.update(dept)
 
-    async def execute(self) -> List[Department]:
-        return await self.service.list_departments()
-
-
-class DeleteDepartmentUseCase:
-    def __init__(self, service: DepartmentService):
-        self.service = service
-
-    async def execute(self, dept_id: int) -> bool:
-        deleted = await self.service.delete_department(dept_id)
+    async def delete_department(self, department_id: int) -> bool:
+        deleted = await self.dept_repo.delete(department_id)
         if not deleted:
-            raise ValueError(f"Department with ID {dept_id} not found")
-        return deleted
-
-
-class AssignManagerUseCase:
-    def __init__(self, service: DepartmentService):
-        self.service = service
-
-    async def execute(self, dept_id: int, manager_id: int) -> Department:
-        dept = await self.service.assign_manager(dept_id, manager_id)
-        if not dept:
-            raise ValueError(f"Department with ID {dept_id} not found")
-        return dept
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Department not found"
+            )
+        return True

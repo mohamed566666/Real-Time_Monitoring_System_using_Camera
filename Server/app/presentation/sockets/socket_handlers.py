@@ -1,122 +1,85 @@
-from datetime import datetime
+import logging
 from uuid import UUID
-from .socket_events import SocketEvents, SocketRooms
+
+from app.presentation.sockets.socket_manager import sio
+from app.presentation.sockets.socket_events import ClientEvents, ServerEvents
+from app.infrastructure.db.database import AsyncSessionLocal
+from app.infrastructure.repositories.implementations.heartbeat_repository import (
+    HeartbeatRepository,
+)
+from app.infrastructure.repositories.implementations.session_repository import (
+    SessionRepository,
+)
+from app.domain.entities.entities import HeartbeatEntity
+
+logger = logging.getLogger(__name__)
 
 
-async def handle_connect(sid, environ, auth, sio):
-    role = (auth or {}).get("role", "unknown")
-    device_id = (auth or {}).get("device_id")
+def register_handlers() -> None:
+    @sio.event
+    async def connect(sid: str, environ: dict, auth: dict | None = None):
+        logger.info("Socket connected: %s", sid)
 
-    if role == "admin":
-        await sio.enter_room(sid, SocketRooms.ADMIN)
-        print(f"[WS] Admin connected: {sid}")
-    elif role == "device" and device_id is not None:
-        room = SocketRooms.device_room(device_id)
+    @sio.event
+    async def disconnect(sid: str):
+        logger.info("Socket disconnected: %s", sid)
+
+    @sio.on(ClientEvents.JOIN_MANAGER_ROOM)
+    async def on_join_room(sid: str, data: dict):
+        manager_id = data.get("manager_id")
+        if not manager_id:
+            return {"error": "manager_id required"}
+        room = f"manager_{manager_id}"
         await sio.enter_room(sid, room)
-        print(f"[WS] Device {device_id} connected: {sid}")
-    else:
-        print(f"[WS] Unknown connection: {sid} with role {role}")
+        logger.info("sid=%s joined room %s", sid, room)
+        return {"joined": room}
 
-    await sio.emit(
-        SocketEvents.CONNECTED,
-        {"status": "ok", "sid": sid, "role": role},
-        to=sid,
-    )
+    @sio.on(ClientEvents.HEARTBEAT)
+    async def on_heartbeat(sid: str, data: dict):
+        session_id_raw = data.get("session_id")
+        status = data.get("status", "")
 
-
-async def handle_disconnect(sid, sio):
-    print(f"[WS] Client disconnected: {sid}")
-
-
-async def handle_heartbeat(sid, data, sio, heartbeat_service, session_service):
-    session_id = data.get("session_id")
-    ts = data.get("timestamp") or datetime.utcnow().isoformat()
-
-    if not session_id:
-        await sio.emit(
-            SocketEvents.ERROR,
-            {"message": "heartbeat requires session_id"},
-            to=sid,
-        )
-        return
-
-    try:
-        session = await session_service.get_session(UUID(session_id))
-        if not session:
+        if not session_id_raw or status != "active":
             await sio.emit(
-                SocketEvents.ERROR,
-                {"message": f"Session {session_id} not found"},
+                ServerEvents.HEARTBEAT_ACK,
+                {"ok": False, "error": "invalid payload"},
                 to=sid,
             )
             return
 
-        if hasattr(session, 'logout_time') and session.logout_time:
+        try:
+            session_id = UUID(session_id_raw)
+        except ValueError:
             await sio.emit(
-                SocketEvents.ERROR,
-                {"message": f"Session {session_id} has already ended"},
+                ServerEvents.HEARTBEAT_ACK,
+                {"ok": False, "error": "invalid session_id format"},
                 to=sid,
             )
             return
 
-        heartbeat_data = await heartbeat_service.record_heartbeat(
-            session_id=UUID(session_id)
-        )
-        
-        payload = {
-            "session_id": str(session_id),
-            "device_id": session.device_id,
-            "user_id": session.user_id,
-            "timestamp": ts,
-            "heartbeat_id": heartbeat_data["id"],
-            "type": "heartbeat",
-        }
+        async with AsyncSessionLocal() as db:
+            session_repo = SessionRepository(db)
+            heartbeat_repo = HeartbeatRepository(db)
+
+            session = await session_repo.get_by_id(session_id)
+            if not session or session.logout_time is not None:
+                await sio.emit(
+                    ServerEvents.HEARTBEAT_ACK,
+                    {"ok": False, "error": "session not found or already closed"},
+                    to=sid,
+                )
+                return
+
+            heartbeat = HeartbeatEntity(
+                id=None,
+                session_id=session_id,
+                employee_id=session.employee_id,
+            )
+            await heartbeat_repo.create(heartbeat)
 
         await sio.emit(
-            SocketEvents.HEARTBEAT_ACK,
-            {
-                "session_id": str(session_id),
-                "timestamp": ts,
-                "heartbeat_id": heartbeat_data["id"]
-            },
+            ServerEvents.HEARTBEAT_ACK,
+            {"ok": True, "session_id": session_id_raw},
             to=sid,
         )
-
-        await sio.emit(
-            SocketEvents.SESSION_HEARTBEAT, 
-            payload, 
-            room=SocketRooms.ADMIN
-        )
-
-        print(f"[WS] Heartbeat recorded for session {session_id}")
-
-    except ValueError as e:
-        await sio.emit(
-            SocketEvents.ERROR,
-            {"message": str(e)},
-            to=sid,
-        )
-    except Exception as e:
-        await sio.emit(
-            SocketEvents.ERROR,
-            {"message": f"Internal error: {str(e)}"},
-            to=sid,
-        )
-
-
-async def handle_subscribe_session(sid, data, sio):
-    session_id = data.get("session_id")
-    if session_id:
-        await sio.enter_room(sid, SocketRooms.session_room(session_id))
-        await sio.emit(
-            SocketEvents.SUBSCRIBED, 
-            {"session_id": str(session_id)}, 
-            to=sid
-        )
-        print(f"[WS] Client {sid} subscribed to session {session_id}")
-
-
-async def handle_unsubscribe_session(sid, data, sio):
-    session_id = data.get("session_id")
-    if session_id:
-        await sio.leave_room(sid, SocketRooms.session_room(session_id))
-        print(f"[WS] Client {sid} unsubscribed from session {session_id}")
+        logger.debug("Heartbeat recorded for session %s", session_id_raw)
